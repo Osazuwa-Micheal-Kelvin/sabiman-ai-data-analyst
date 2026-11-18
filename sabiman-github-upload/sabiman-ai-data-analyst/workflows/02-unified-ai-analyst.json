@@ -1,0 +1,704 @@
+{
+  "name": "SABIMAN Workflow 2 — Unified AI Analyst",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sabiman-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7b677062-eb02-463d-a76b-695c883d05f9",
+      "name": "AI Analyst Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        19504,
+        4096
+      ],
+      "webhookId": "a285ce41-727e-4236-ae74-0f69c76e6788"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "mode"
+            },
+            {
+              "name": "dataset_session_id"
+            },
+            {
+              "name": "dataset_path"
+            },
+            {
+              "name": "meta_path"
+            },
+            {
+              "name": "csv_text"
+            },
+            {
+              "name": "meta",
+              "type": "object"
+            },
+            {
+              "name": "columns",
+              "type": "array"
+            },
+            {
+              "name": "dtypes",
+              "type": "object"
+            },
+            {
+              "name": "role_map",
+              "type": "object"
+            },
+            {
+              "name": "quality_report",
+              "type": "object"
+            },
+            {
+              "name": "warnings",
+              "type": "array"
+            },
+            {
+              "name": "question"
+            },
+            {
+              "name": "business_id"
+            },
+            {
+              "name": "app_session_id"
+            }
+          ]
+        }
+      },
+      "id": "66974aa9-665c-481d-a6b2-3d86adff751f",
+      "name": "Workflow 1 Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        19504,
+        3872
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-web",
+              "leftValue": "={{ $json.body ? \"webhook\" : \"workflow1\" }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "84c7fb0e-9ec9-4550-b92a-3931945bd1bf",
+      "name": "Webhook or Workflow 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        19760,
+        4048
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-voice",
+              "leftValue": "={{ $json.body?.type || $json.type || \"text\" }}",
+              "rightValue": "voice",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b509c16c-3eab-4bcd-beb0-e20c8bf1f08d",
+      "name": "Voice Question?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        20016,
+        4032
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "inputType": "binary",
+        "binaryPropertyName": "audio",
+        "options": {}
+      },
+      "id": "defaf3e2-c64e-4f23-bf50-c695d963cb4b",
+      "name": "Voice Transcription",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        20256,
+        3952
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "source",
+              "value": "webhook",
+              "type": "string",
+              "id": "9397e6d2-4fd8-4ca8-929a-e595099a334d"
+            },
+            {
+              "name": "mode",
+              "value": "={{ $json.body?.mode || \"question\" }}",
+              "type": "string",
+              "id": "1dbc117f-466a-42d0-956e-01b0766704d0"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $(\"AI Analyst Webhook\").first().json.body?.dataset_session_id || $(\"AI Analyst Webhook\").first().json.body?.app_session_id || \"\" }}",
+              "type": "string",
+              "id": "e8a1504a-7549-4945-8bee-dbb604296530"
+            },
+            {
+              "name": "dataset_session_id",
+              "value": "={{ $(\"AI Analyst Webhook\").first().json.body?.dataset_session_id || \"\" }}",
+              "type": "string",
+              "id": "c8914a60-53d4-43db-b6ee-f962df2282c3"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ $(\"AI Analyst Webhook\").first().json.body?.business_id || \"\" }}",
+              "type": "string",
+              "id": "6e81880f-ee4b-4b40-93ea-6a6e294ccc57"
+            },
+            {
+              "name": "app_session_id",
+              "value": "={{ $(\"AI Analyst Webhook\").first().json.body?.app_session_id || \"\" }}",
+              "type": "string",
+              "id": "8f518532-7b3b-49ad-9f96-b16a659b9e59"
+            },
+            {
+              "name": "question",
+              "value": "={{ $json.text || $json.transcript || $json.response || \"\" }}{{ $json.content.parts[0].text }}",
+              "type": "string",
+              "id": "584bfbdc-1b94-4722-bde9-c756c119faf3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "09b73693-4064-4cd6-9ce8-8bdbd93e5e14",
+      "name": "Normalize Voice",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        20512,
+        3952
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "source",
+              "value": "webhook",
+              "type": "string"
+            },
+            {
+              "name": "mode",
+              "value": "={{ $json.body?.mode || \"question\" }}",
+              "type": "string"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $json.body?.dataset_session_id || $json.body?.app_session_id || $json.dataset_session_id || $json.app_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "dataset_session_id",
+              "value": "={{ $json.body?.dataset_session_id || $json.dataset_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ $json.body?.business_id || $json.business_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "app_session_id",
+              "value": "={{ $json.body?.app_session_id || $json.app_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "question",
+              "value": "={{ $json.body?.message || $json.body?.question || $json.message || $json.question || \"\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2aaba969-c734-49c2-b4ee-dbc2d99d7a2a",
+      "name": "Normalize Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        20256,
+        4144
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "source",
+              "value": "workflow1",
+              "type": "string"
+            },
+            {
+              "name": "mode",
+              "value": "initial_eda",
+              "type": "string"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $json.dataset_session_id || $json.app_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "dataset_session_id",
+              "value": "={{ $json.dataset_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "business_id",
+              "value": "={{ $json.business_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "app_session_id",
+              "value": "={{ $json.app_session_id || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "csv_text",
+              "value": "={{ $json.csv_text || \"\" }}",
+              "type": "string"
+            },
+            {
+              "name": "meta",
+              "value": "={{ $json.meta || {} }}",
+              "type": "object"
+            },
+            {
+              "name": "columns",
+              "value": "={{ $json.columns || [] }}",
+              "type": "array"
+            },
+            {
+              "name": "dtypes",
+              "value": "={{ $json.dtypes || {} }}",
+              "type": "object"
+            },
+            {
+              "name": "role_map",
+              "value": "={{ $json.role_map || {} }}",
+              "type": "object"
+            },
+            {
+              "name": "quality_report",
+              "value": "={{ $json.quality_report || {} }}",
+              "type": "object"
+            },
+            {
+              "name": "warnings",
+              "value": "={{ $json.warnings || [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "237af5bc-f448-4360-8232-eecd2402d32d",
+      "name": "Normalize Workflow 1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        20016,
+        4304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json || {};\nconst mode = String(p.mode || 'question');\nconst session = String(p.session_id || p.dataset_session_id || p.app_session_id || '').trim();\nif (!session) throw new Error('Missing session_id. Use dataset_session_id or app_session_id consistently.');\n\nlet user_message;\nif (mode === 'initial_eda') {\n  const csv = String(p.csv_text || '').trim();\n  if (!csv) throw new Error('Workflow 1 did not provide csv_text. Check the Execute Workflow node mapping in Workflow 1.');\n\n  const columns = Array.isArray(p.columns) ? p.columns : [];\n  const dtypes = (p.dtypes && typeof p.dtypes === 'object') ? p.dtypes : {};\n  const roleMap = (p.role_map && typeof p.role_map === 'object') ? p.role_map : {};\n  const qualityReport = (p.quality_report && typeof p.quality_report === 'object') ? p.quality_report : {};\n  const warnings = Array.isArray(p.warnings) ? p.warnings : [];\n\n  user_message = `Analyze this business dataset now. This is the initial exploratory analysis for session ${session}.\n\nDataset metadata:\n${JSON.stringify(p.meta || {})}\n\nColumn names:\n${JSON.stringify(columns)}\n\nColumn data types:\n${JSON.stringify(dtypes)}\n\nColumn role map (how each column should be interpreted, e.g. date/revenue/product/customer):\n${JSON.stringify(roleMap)}\n\nData quality report:\n${JSON.stringify(qualityReport)}\n\nData warnings:\n${JSON.stringify(warnings)}\n\nCSV DATASET:\n${csv}\n\nPerform exploratory data analysis immediately. Use the column roles, dtypes, quality report and warnings above to interpret the dataset correctly and flag any relevant caveats. Return an executive summary, key findings, KPIs, recommendations, quick follow-up questions, and frontend-renderable visualizations. Do not invent values. Use tables when structured records are more useful than charts.`;\n} else {\n  const q = String(p.question || '').trim();\n  if (!q) throw new Error('Missing question.');\n  user_message = `Answer the user's question using the business dataset stored in conversation memory for session ${session}.\n\nUSER QUESTION:\n${q}\n\nDo not ask for the CSV again. Use the remembered dataset, along with its column roles, dtypes, quality report and warnings, as the source of truth. Perform deeper analysis where required. Return a clear answer and include a frontend-renderable visualization only when useful.`;\n}\nreturn [{json:{...p, session_id:session, analyst_user_message:user_message}}];"
+      },
+      "id": "fc3f2721-cf5c-4117-9351-285d18a0bf24",
+      "name": "Build Gemini User Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20768,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.analyst_user_message }}",
+        "options": {
+          "systemMessage": "You are Sabiman AI, the business intelligence analyst for Sabiman.\n\nYou have conversation memory. On the first turn, the user message contains the complete business CSV dataset. That dataset is intentionally stored in memory so follow-up questions can use the same dataset without resending it. Alongside the CSV, that first turn also includes the column names, column data types, a column role map (which column is the date, revenue, product, customer, etc.), a data quality report, and any data warnings. Treat all of this as ground truth about the dataset's shape and known issues, and use it to interpret columns correctly and flag relevant caveats in your analysis.\n\nRules:\n- Treat the remembered dataset as the source of truth.\n- Never invent numerical values, columns, trends, or unsupported causes.\n- For initial_eda, analyze the whole dataset and produce an executive summary, key findings, KPIs, recommendations, and useful visualizations.\n- For later questions, answer directly from the remembered dataset and perform deeper reasoning where necessary.\n- Do not ask the user to resend the dataset when it is already in memory.\n- For tables/records, use visualization type=table. Charts are not mandatory for every response.\n- Every visualization must contain actual values derived from the dataset.\n- voice_output must be concise and directly speakable.\n- Return ONLY valid JSON. No markdown fences.\n\nJSON schema:\n{\n  \"success\": true,\n  \"mode\": \"initial_eda|question\",\n  \"answer\": \"\",\n  \"summary\": \"\",\n  \"voice_output\": \"\",\n  \"findings\": [{\"title\":\"\",\"detail\":\"\",\"importance\":\"high|medium|low\"}],\n  \"recommendations\": [{\"title\":\"\",\"detail\":\"\"}],\n  \"kpis\": [{\"label\":\"\",\"value\":null,\"formatted\":\"\"}],\n  \"visualizations\": [{\"type\":\"bar|line|pie|doughnut|area|scatter|table\",\"title\":\"\",\"labels\":[],\"datasets\":[],\"columns\":[],\"rows\":[]}],\n  \"quick_questions\": []\n}\n\nIf there is insufficient information in memory, state that clearly instead of fabricating an answer.",
+          "maxIterations": 3
+        }
+      },
+      "id": "8257d12b-94ce-4544-bf7e-58d3155ec4f0",
+      "name": "SABIMAN AI Analyst — Gemini 2.5 Flash",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        21008,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.8-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "5d55abe9-9448-4d0a-a6dd-8e5c1102eb4f",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        20960,
+        4320
+      ]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.session_id }}",
+        "contextWindowLength": 80
+      },
+      "id": "a78fe7d9-76dd-4aca-bc06-eea82203432b",
+      "name": "SABIMAN Dataset Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        21104,
+        4336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.output ?? $json.text ?? $json.response ?? $json;\nlet p = raw;\nif (typeof raw === 'string') {\n  try { p = JSON.parse(raw); } catch (_) {\n    const a = raw.indexOf('{');\n    const b = raw.lastIndexOf('}');\n    if (a >= 0 && b > a) {\n      try { p = JSON.parse(raw.slice(a,b+1)); } catch (_) {}\n    }\n  }\n}\nif (!p || typeof p !== 'object') p = {answer:String(raw ?? '')};\nconst s = $('Build Gemini User Message').first().json;\nreturn [{json:{\n  success:p.success!==false,\n  mode:s.mode,\n  session_id:s.session_id,\n  dataset_session_id:s.dataset_session_id||'',\n  business_id:s.business_id||'',\n  app_session_id:s.app_session_id||'',\n  answer:p.answer||p.summary||'',\n  summary:p.summary||p.answer||'',\n  voice_output:p.voice_output||p.answer||p.summary||'',\n  findings:Array.isArray(p.findings)?p.findings:[],\n  recommendations:Array.isArray(p.recommendations)?p.recommendations:[],\n  kpis:Array.isArray(p.kpis)?p.kpis:[],\n  visualizations:Array.isArray(p.visualizations)?p.visualizations:[],\n  quick_questions:Array.isArray(p.quick_questions)?p.quick_questions:[]\n}}];"
+      },
+      "id": "aebb6849-9f5b-445f-8b7b-105f5417c52e",
+      "name": "Build Frontend Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21296,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## SABIMAN WORKFLOW 2 — MEMORY DATASET EDA + TEXT/VOICE Q&A\n\nINITIAL DATASET HANDOFF\nWorkflow 1 → Workflow 2 Trigger → store dataset in Gemini memory → initial EDA → Return Initial EDA to Workflow 1.\n\nWorkflow 1 must be configured to WAIT for the Execute Workflow result, then return that result from its upload webhook to the frontend.\n\nFOLLOW-UP QUESTIONS\nFrontend → Workflow 2 /sabiman-chat → Gemini + same memory session → Respond to Frontend Webhook. Workflow 1 is NOT involved.\n\nSESSION\nMemory session key = dataset_session_id. New dataset = new dataset_session_id and therefore a separate memory.\n\nIMPORTANT\nOnly the initial_eda handoff requires csv_text. Text/voice questions do not send csv_text again.\n",
+        "height": 800
+      },
+      "id": "7fe74592-9fb0-4a1a-8330-fc5a2ad9e7fc",
+      "name": "SETUP NOTES",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        19216,
+        3760
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "source-check",
+              "leftValue": "={{ $(\"Build Gemini User Message\").first().json.source }}",
+              "rightValue": "workflow1",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c232d6f2-d79a-436b-b732-a902196704b0",
+      "name": "Initial Dataset Handoff?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        21504,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:$input.first().json}];"
+      },
+      "id": "48e93e31-1d8e-4000-9c3c-ba8596b91a6a",
+      "name": "Return Initial EDA to Workflow 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21760,
+        3984
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "fa22470e-0359-4c17-899a-77d28469116f",
+      "name": "Respond to Frontend Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        21760,
+        4224
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Analyst Webhook": {
+      "main": [
+        [
+          {
+            "node": "Webhook or Workflow 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow 1 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Workflow 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook or Workflow 1?": {
+      "main": [
+        [
+          {
+            "node": "Voice Question?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalize Workflow 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Question?": {
+      "main": [
+        [
+          {
+            "node": "Voice Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalize Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Transcription": {
+      "main": [
+        [
+          {
+            "node": "Normalize Voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Voice": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Text": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Workflow 1": {
+      "main": [
+        [
+          {
+            "node": "Build Gemini User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gemini User Message": {
+      "main": [
+        [
+          {
+            "node": "SABIMAN AI Analyst — Gemini 2.5 Flash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SABIMAN AI Analyst — Gemini 2.5 Flash": {
+      "main": [
+        [
+          {
+            "node": "Build Frontend Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "SABIMAN AI Analyst — Gemini 2.5 Flash",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SABIMAN Dataset Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "SABIMAN AI Analyst — Gemini 2.5 Flash",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Frontend Response": {
+      "main": [
+        [
+          {
+            "node": "Initial Dataset Handoff?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initial Dataset Handoff?": {
+      "main": [
+        [
+          {
+            "node": "Return Initial EDA to Workflow 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Frontend Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,665 @@
+{
+  "name": "SABIMAN — Dataset Ingestion final",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sabiman-dataset-upload",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "45a5765f-72a3-4e75-a1ea-38b985ccbbb9",
+      "name": "Dataset Upload Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        21056,
+        224
+      ],
+      "webhookId": "sabiman-dataset-upload"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst body = item.json?.body || item.json || {};\nconst binary = item.binary || {};\nconst keys = Object.keys(binary);\n\nconst errors = [];\n\nif (!body.dataset_session_id) {\n  errors.push('Missing dataset_session_id.');\n}\n\nif (!keys.length) {\n  errors.push('No dataset files were received.');\n}\n\nconst allowedExt = new Set(['csv', 'xlsx']);\nconst maxFileBytes = 20 * 1024 * 1024; // 20MB per file\nconst maxFiles = 10;\n\nif (keys.length > maxFiles) {\n  errors.push(`Too many files: ${keys.length}. Maximum allowed is ${maxFiles}.`);\n}\n\nfor (const key of keys) {\n  const b = binary[key];\n  const name = b.fileName || key;\n  const ext = name.toLowerCase().split('.').pop();\n\n  if (!allowedExt.has(ext)) {\n    errors.push(`Unsupported file type: ${name} (.${ext}).`);\n    continue;\n  }\n\n  const size = Number(b.fileSize || 0);\n  if (size && size > maxFileBytes) {\n    errors.push(`File too large: ${name} (${(size / 1024 / 1024).toFixed(1)}MB). Limit is 20MB.`);\n  }\n}\n\nif (errors.length) {\n  throw new Error(`Dataset upload validation failed: ${errors.join(' ')}`);\n}\n\n// Validation passed -- pass the original item through unchanged (binary preserved).\nreturn [item];"
+      },
+      "id": "1cf53202-8620-4747-9bb6-1652d88acf66",
+      "name": "File Validation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21312,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst body = item.json?.body || item.json || {};\nconst binary = item.binary || {};\nconst keys = Object.keys(binary);\n\nif (!body.dataset_session_id) {\n  throw new Error('Missing dataset_session_id');\n}\n\nif (!keys.length) {\n  throw new Error('No dataset files received');\n}\n\nconst allowed = new Set(['csv', 'xlsx']);\nconst files = [];\n\nfor (const key of keys) {\n  const b = binary[key];\n  const name = b.fileName || key;\n  const ext = name.toLowerCase().split('.').pop();\n\n  if (!allowed.has(ext)) {\n    throw new Error(`Unsupported file type: ${name}`);\n  }\n\n  const buffer = await this.helpers.getBinaryDataBuffer(0, key);\n\n  files.push({\n    field_name: key,\n    file_name: name,\n    extension: ext,\n    mime_type: b.mimeType || 'application/octet-stream',\n    size: buffer.length,\n    data_base64: buffer.toString('base64')\n  });\n}\n\nreturn [{\n  json: {\n    dataset_session_id: String(body.dataset_session_id),\n    app_session_id: body.app_session_id || null,\n    timestamp: body.timestamp || new Date().toISOString(),\n    file_count: files.length,\n    files\n  }\n}];"
+      },
+      "id": "df208770-9a61-4403-91e2-ceec363b80b6",
+      "name": "Bridge Binary Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21568,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import base64\nimport io\nimport pandas as pd\n\nitem = _items[0]\npayload = item['json']\n\nprofiles = []\nfor file_info in payload['files']:\n    raw = base64.b64decode(file_info['data_base64'])\n    ext = file_info['extension']\n    name = file_info['file_name']\n\n    if ext == 'csv':\n        try:\n            df = pd.read_csv(io.BytesIO(raw))\n        except UnicodeDecodeError:\n            df = pd.read_csv(io.BytesIO(raw), encoding='latin-1')\n    elif ext == 'xlsx':\n        df = pd.read_excel(io.BytesIO(raw), engine='openpyxl')\n    else:\n        raise ValueError(f'Unsupported extension: {ext}')\n\n    columns = []\n    for col in df.columns:\n        series = df[col]\n        columns.append({\n            'name': str(col),\n            'dtype': str(series.dtype),\n            'null_count': int(series.isna().sum()),\n            'null_rate': round(float(series.isna().mean()), 6),\n            'unique_count': int(series.nunique(dropna=True)),\n            'sample_values': [str(x) for x in series.dropna().head(5).tolist()]\n        })\n\n    profiles.append({\n        'file_name': name,\n        'extension': ext,\n        'rows': int(len(df)),\n        'columns': int(len(df.columns)),\n        'duplicate_rows': int(df.duplicated().sum()),\n        'column_names': [str(c) for c in df.columns],\n        'columns_detail': columns,\n        'preview': [\n            {str(k): (None if pd.isna(v) else str(v)) for k, v in row.items()}\n            for row in df.head(3).to_dict(orient='records')\n        ]\n    })\n\nreturn [{\n    'json': {\n        'dataset_session_id': payload['dataset_session_id'],\n        'app_session_id': payload.get('app_session_id'),\n        'file_count': len(profiles),\n        'profiles': profiles\n    }\n}]"
+      },
+      "id": "1393b222-c9df-4515-9d76-8e7f9524a8ef",
+      "name": "Python — Profile Raw Dataset",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        21824,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json) }}",
+        "options": {
+          "systemMessage": "You are Sabiman's dataset structure planner. The input contains profiles of one or more uploaded CSV/XLSX files (column names, dtypes, null rates, sample values, duplicate row counts). Files may be a mix of CSV and XLSX -- format does not affect how you classify or combine them.\n\nYour job has two parts:\n1. Relationship decision: decide whether the files should be treated as standalone, appended, joined, or rejected. Rules: if only one file exists, ALWAYS return standalone. Never invent a join key that isn't clearly present in the sample values or column names. Prefer append only when schemas are materially compatible (similar column sets). Prefer join only when a clear shared identifier column exists in the files being joined.\n\nWhen more than two files need to be combined, 'operations' is an ORDERED LIST executed in sequence. Each operation may reference either an original uploaded file name, or the 'result_name' of an EARLIER operation in this same list (so you can chain steps -- e.g. join file A to file B producing 'op1', then append file C to 'op1' producing the final result). You may also combine 3+ compatible files in a single append operation by listing all of them in 'datasets' -- you don't need to chain pairwise appends. The LAST operation in the list produces the analytical dataset used downstream, so make sure every original file you intend to use ends up referenced by some operation.\n\n2. Column classification and cleaning plan, PER FILE: for every column, assign a role from this exact set: ['date','currency','percent','number','boolean','category','identifier','text']. Also flag which columns need trimming, case normalization, currency symbol stripping, percent symbol stripping, boolean value mapping, or date parsing.\n\nBe conservative: if you are not confident about a column's role, classify it as 'text' rather than guessing at a numeric or date type -- a wrong type coercion is worse than leaving a column as text for the analyst to handle later.\n\nReturn ONLY valid JSON in this exact shape and nothing else -- no markdown, no code fence, no commentary:\n{\"decision\":\"standalone|append|join|reject\",\"operations\":[{\"type\":\"append|join\",\"datasets\":[],\"left\":\"\",\"right\":\"\",\"keys\":[],\"join_type\":\"left\",\"result_name\":\"\",\"reason\":\"\"}],\"reason\":\"\",\"file_plans\":[{\"file_name\":\"\",\"columns\":[{\"name\":\"\",\"role\":\"date|currency|percent|number|boolean|category|identifier|text\",\"needs_trim\":true,\"needs_case_normalize\":true}]}]}"
+        }
+      },
+      "id": "5265d36a-24a7-421a-a750-06ecb8762510",
+      "name": "AI — Dataset Structure Planner",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        22080,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "a4f9face-bcb7-4e33-b966-0d5a874bab3e",
+      "name": "Chat Model — Dataset Structure Planner",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        22080,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.item.json.output ?? '';\nlet plan;\n\nif (raw && typeof raw === 'object') {\n  plan = raw;\n} else if (typeof raw === 'string') {\n  try {\n    plan = JSON.parse(raw);\n  } catch (e) {\n    const start = raw.indexOf('{');\n    const end = raw.lastIndexOf('}');\n    if (start < 0 || end < start) {\n      throw new Error('AI planner did not return valid JSON');\n    }\n    plan = JSON.parse(raw.slice(start, end + 1));\n  }\n} else {\n  throw new Error('Unexpected AI planner output');\n}\n\nconst profileItem = $('Python — Profile Raw Dataset').item;\nconst profiles = profileItem.json.profiles;\nconst sessionId = profileItem.json.dataset_session_id;\nconst appSessionId = profileItem.json.app_session_id;\n// Carried forward so every downstream Python node gets everything it needs\n// from its own direct input -- no cross-node lookups required past this point.\nconst files = $('Bridge Binary Files').item.json.files;\n\n// Hard reliability rule: one file is ALWAYS standalone.\nif (profiles.length === 1) {\n  plan.decision = 'standalone';\n  plan.operations = [];\n  plan.reason = plan.reason || 'Only one dataset file was supplied.';\n}\n\n// Defensive default: if the model omitted file_plans, fall back to\n// treating every column as text so cleaning becomes a safe no-op\n// instead of crashing the pipeline.\nif (!Array.isArray(plan.file_plans) || !plan.file_plans.length) {\n  plan.file_plans = profiles.map(p => ({\n    file_name: p.file_name,\n    columns: p.column_names.map(name => ({ name, role: 'text', needs_trim: false, needs_case_normalize: false }))\n  }));\n}\n\nreturn [{\n  json: {\n    dataset_session_id: sessionId,\n    app_session_id: appSessionId,\n    profiles,\n    plan,\n    files\n  }\n}];"
+      },
+      "id": "29d6daac-66bd-4de5-a4c5-4581a5740bcf",
+      "name": "JS — Prepare Cleaning Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22336,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import base64\nimport io\nimport re\nimport pandas as pd\n\nitem = _items[0]\npayload = item['json']\nfiles = payload['files']\nfile_plans = {fp['file_name']: fp for fp in payload['plan'].get('file_plans', [])}\n\nBOOL_TRUE = {'true', 'yes', 'y', '1'}\nBOOL_FALSE = {'false', 'no', 'n', '0'}\n\ndef strip_currency(series):\n    cleaned = series.astype(str).str.replace(r'[₦$€£,\\s]', '', regex=True)\n    cleaned = cleaned.replace({'': None, 'nan': None, 'None': None})\n    return pd.to_numeric(cleaned, errors='coerce')\n\ndef strip_percent(series):\n    cleaned = series.astype(str).str.replace('%', '', regex=False).str.replace(',', '', regex=False).str.strip()\n    cleaned = cleaned.replace({'': None, 'nan': None, 'None': None})\n    return pd.to_numeric(cleaned, errors='coerce')\n\ndef map_boolean(series):\n    def convert(v):\n        if pd.isna(v):\n            return None\n        s = str(v).strip().lower()\n        if s in BOOL_TRUE:\n            return True\n        if s in BOOL_FALSE:\n            return False\n        return None\n    return series.apply(convert)\n\ndef normalize_category(series):\n    cleaned = series.astype(str).str.strip()\n    cleaned = cleaned.str.replace(r'\\s+', ' ', regex=True)\n    cleaned = cleaned.str.title()\n    cleaned = cleaned.replace({'Nan': None, '': None})\n    return cleaned\n\ncleaned_datasets = []\noverall_warnings = []\noverall_stats = {\n    'missing_values': 0,\n    'duplicate_rows': 0,\n    'columns_converted': 0,\n    'categories_standardized': 0,\n    'invalid_values': 0,\n    'rows_removed': 0\n}\n\nfor file_info in files:\n    raw = base64.b64decode(file_info['data_base64'])\n    ext = file_info['extension']\n    name = file_info['file_name']\n\n    if ext == 'csv':\n        try:\n            df = pd.read_csv(io.BytesIO(raw))\n        except UnicodeDecodeError:\n            df = pd.read_csv(io.BytesIO(raw), encoding='latin-1')\n    elif ext == 'xlsx':\n        df = pd.read_excel(io.BytesIO(raw), engine='openpyxl')\n    else:\n        raise ValueError(f'Unsupported extension: {ext}')\n\n    original_rows = int(len(df))\n\n    # 1. Column names: trim whitespace, collapse internal whitespace.\n    df.columns = [re.sub(r'\\s+', ' ', str(c)).strip() for c in df.columns]\n\n    # 2. Drop columns that are entirely empty -- safe, information-free.\n    empty_cols = [c for c in df.columns if df[c].isna().all()]\n    if empty_cols:\n        df = df.drop(columns=empty_cols)\n\n    # 3. Flag (do NOT drop) constant columns -- could be a legitimate\n    #    single-value field (e.g. every row is \"Nigeria\").\n    constant_cols = [c for c in df.columns if df[c].nunique(dropna=True) == 1]\n\n    plan = file_plans.get(name, {'columns': []})\n    role_by_col = {c['name']: c for c in plan.get('columns', [])}\n\n    columns_converted = 0\n    categories_standardized = 0\n    invalid_values = 0\n\n    for col in df.columns:\n        role_info = role_by_col.get(col, {})\n        role = role_info.get('role', 'text')\n\n        if role == 'currency':\n            before_na = int(df[col].isna().sum())\n            df[col] = strip_currency(df[col])\n            after_na = int(df[col].isna().sum())\n            invalid_values += max(0, after_na - before_na)\n            columns_converted += 1\n        elif role == 'percent':\n            before_na = int(df[col].isna().sum())\n            df[col] = strip_percent(df[col])\n            after_na = int(df[col].isna().sum())\n            invalid_values += max(0, after_na - before_na)\n            columns_converted += 1\n        elif role == 'number':\n            before_na = int(df[col].isna().sum())\n            df[col] = pd.to_numeric(\n                df[col].astype(str).str.replace(',', '', regex=False),\n                errors='coerce'\n            )\n            after_na = int(df[col].isna().sum())\n            invalid_values += max(0, after_na - before_na)\n            columns_converted += 1\n        elif role == 'date':\n            before_na = int(df[col].isna().sum())\n            df[col] = pd.to_datetime(df[col], errors='coerce')\n            after_na = int(df[col].isna().sum())\n            invalid_values += max(0, after_na - before_na)\n            columns_converted += 1\n        elif role == 'boolean':\n            df[col] = map_boolean(df[col])\n            columns_converted += 1\n        elif role == 'category':\n            before_unique = int(df[col].nunique(dropna=True))\n            df[col] = normalize_category(df[col])\n            after_unique = int(df[col].nunique(dropna=True))\n            if after_unique < before_unique:\n                categories_standardized += 1\n        # 'identifier' and 'text' roles are left untouched -- trimming an ID\n        # or free-text field risks changing its meaning.\n\n    # 4. Duplicate rows: exact full-row duplicates are safe to drop.\n    dup_count = int(df.duplicated().sum())\n    df = df.drop_duplicates()\n    rows_removed = original_rows - int(len(df))\n\n    # 5. Missing values: count only -- never impute automatically.\n    missing_total = int(df.isna().sum().sum())\n\n    # 6. Outlier flagging (IQR method) -- flag only, never remove.\n    outlier_warnings = []\n    for col in df.columns:\n        if role_by_col.get(col, {}).get('role') in ('number', 'currency', 'percent'):\n            series = df[col].dropna()\n            if len(series) >= 10:\n                q1 = series.quantile(0.25)\n                q3 = series.quantile(0.75)\n                iqr = q3 - q1\n                if iqr > 0:\n                    lower = q1 - 1.5 * iqr\n                    upper = q3 + 1.5 * iqr\n                    outlier_count = int(((series < lower) | (series > upper)).sum())\n                    if outlier_count > 0:\n                        rate = round(outlier_count / len(series) * 100, 1)\n                        if rate >= 1:\n                            outlier_warnings.append(\n                                f\"{name}: '{col}' has {outlier_count} possible outliers ({rate}% of values).\"\n                            )\n\n    file_warnings = list(outlier_warnings)\n    if constant_cols:\n        file_warnings.append(f\"{name}: constant column(s) kept but flagged: {', '.join(constant_cols)}.\")\n    if empty_cols:\n        file_warnings.append(f\"{name}: dropped fully empty column(s): {', '.join(empty_cols)}.\")\n    if dup_count:\n        file_warnings.append(f\"{name}: removed {dup_count} exact duplicate row(s).\")\n\n    for col in df.columns:\n        null_rate = float(df[col].isna().mean())\n        if null_rate >= 0.01:\n            file_warnings.append(f\"{name}: '{col}' contains {round(null_rate * 100, 1)}% missing values.\")\n\n    records = df.to_dict(orient='records')\n    for row in records:\n        for key, value in list(row.items()):\n            if pd.isna(value):\n                row[key] = None\n            else:\n                try:\n                    row[key] = value.isoformat()\n                except AttributeError:\n                    row[key] = str(value) if not isinstance(value, (int, float, bool)) else value\n\n    cleaned_datasets.append({\n        'file_name': name,\n        'rows': int(len(df)),\n        'columns': list(df.columns),\n        'role_map': {c: role_by_col.get(c, {}).get('role', 'text') for c in df.columns},\n        'records': records\n    })\n\n    overall_stats['missing_values'] += missing_total\n    overall_stats['duplicate_rows'] += dup_count\n    overall_stats['columns_converted'] += columns_converted\n    overall_stats['categories_standardized'] += categories_standardized\n    overall_stats['invalid_values'] += invalid_values\n    overall_stats['rows_removed'] += rows_removed\n    overall_warnings.extend(file_warnings)\n\nreturn [{\n    'json': {\n        'dataset_session_id': payload['dataset_session_id'],\n        'app_session_id': payload.get('app_session_id'),\n        'plan': payload['plan'],\n        'cleaned_datasets': cleaned_datasets,\n        'quality_stats': overall_stats,\n        'quality_warnings': overall_warnings\n    }\n}]"
+      },
+      "id": "bfda753a-a3e5-42e2-a819-002824e8017d",
+      "name": "Python — CLEAN + NORMALIZE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22592,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import pandas as pd\n\nitem = _items[0]\npayload = item['json']\nplan = payload['plan']\ndecision = plan.get('decision', 'standalone')\ncleaned_datasets = payload['cleaned_datasets']\nby_name = {d['file_name']: d for d in cleaned_datasets}\n\nvalidation_warnings = []\n\nif decision == 'reject':\n    raise ValueError(f\"Dataset planner rejected this upload: {plan.get('reason', 'no reason given')}\")\n\nif decision == 'standalone':\n    pass  # nothing to validate -- single dataset flows through untouched\n\nelif decision in ('append', 'join'):\n    operations = plan.get('operations') or []\n    if not operations:\n        raise ValueError(f\"Decision '{decision}' given but no operations were specified.\")\n\n    known_names = set(by_name.keys())  # original uploaded files\n    known_columns = {name: set(d['columns']) for name, d in by_name.items()}\n\n    for idx, op in enumerate(operations):\n        op_type = op.get('type')\n        result_name = op.get('result_name') or f'__op{idx}__'\n\n        if op_type == 'append':\n            names = op.get('datasets') or []\n            if len(names) < 2:\n                raise ValueError(f\"Operation {idx}: append needs at least two datasets.\")\n            unknown = [n for n in names if n not in known_names]\n            if unknown:\n                raise ValueError(f\"Operation {idx}: append references unknown dataset(s): {', '.join(unknown)}.\")\n\n            known_col_sets = [known_columns[n] for n in names if n in known_columns]\n            if len(known_col_sets) == len(names):\n                base = known_col_sets[0]\n                for cols in known_col_sets[1:]:\n                    overlap = len(base & cols) / max(len(base | cols), 1)\n                    if overlap < 0.6:\n                        raise ValueError(\n                            f\"Operation {idx}: append rejected -- datasets share only \"\n                            f\"{round(overlap * 100)}% of columns, below the 60% safety threshold.\"\n                        )\n                    if overlap < 0.9:\n                        validation_warnings.append(\n                            f\"Operation {idx}: datasets share {round(overlap * 100)}% of columns -- \"\n                            f\"appending with column mismatches; non-shared columns will contain nulls.\"\n                        )\n                known_columns[result_name] = set.union(*known_col_sets)\n            else:\n                # Some inputs are chained results from earlier operations -- their\n                # columns aren't known until Build Analytical Dataset actually runs.\n                validation_warnings.append(\n                    f\"Operation {idx}: one or more append inputs are chained operation results -- \"\n                    f\"column overlap will only be confirmed when the dataset is built.\"\n                )\n\n            known_names.add(result_name)\n\n        elif op_type == 'join':\n            left_name = op.get('left')\n            right_name = op.get('right')\n            keys = op.get('keys') or []\n\n            if not left_name or not right_name or not keys:\n                raise ValueError(f\"Operation {idx}: join needs left, right, and keys all specified.\")\n            if left_name not in known_names or right_name not in known_names:\n                raise ValueError(\n                    f\"Operation {idx}: join references a dataset that was not found: \"\n                    f\"'{left_name}' or '{right_name}'.\"\n                )\n\n            if left_name in known_columns and right_name in known_columns:\n                missing_keys = [\n                    k for k in keys\n                    if k not in known_columns[left_name] or k not in known_columns[right_name]\n                ]\n                if missing_keys:\n                    raise ValueError(\n                        f\"Operation {idx}: join key(s) not present in both datasets: {', '.join(missing_keys)}.\"\n                    )\n                known_columns[result_name] = known_columns[left_name] | known_columns[right_name]\n            else:\n                validation_warnings.append(\n                    f\"Operation {idx}: join involves a chained operation result -- join keys will only \"\n                    f\"be confirmed when the dataset is built.\"\n                )\n\n            if right_name in by_name:\n                right_df = pd.DataFrame(by_name[right_name]['records'])\n                if not right_df.empty and all(k in right_df.columns for k in keys):\n                    dup_key_count = int(right_df.duplicated(subset=keys).sum())\n                    if dup_key_count > 0:\n                        validation_warnings.append(\n                            f\"Operation {idx}: join key(s) {keys} are not unique in '{right_name}' \"\n                            f\"({dup_key_count} duplicate key rows) -- this join may fan out rows.\"\n                        )\n\n            known_names.add(result_name)\n\n        else:\n            raise ValueError(f\"Operation {idx}: unknown operation type '{op_type}'.\")\nelse:\n    raise ValueError(f\"Unknown planner decision: {decision}\")\n\nreturn [{\n    'json': {\n        'dataset_session_id': payload['dataset_session_id'],\n        'app_session_id': payload.get('app_session_id'),\n        'plan': plan,\n        'cleaned_datasets': cleaned_datasets,\n        'quality_stats': payload['quality_stats'],\n        'quality_warnings': payload['quality_warnings'] + validation_warnings\n    }\n}]"
+      },
+      "id": "d84c0772-c2c9-41d0-8575-87d5ed0681ca",
+      "name": "Python — Validate Join / Append",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        22848,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import pandas as pd\n\nitem = _items[0]\npayload = item['json']\nplan = payload['plan']\ndecision = plan.get('decision', 'standalone')\ncleaned_datasets = payload['cleaned_datasets']\nby_name = {d['file_name']: d for d in cleaned_datasets}\n\nworking = {name: pd.DataFrame(d['records']) for name, d in by_name.items()}\nbuild_notes = []\n\n# Merge role maps from every source file so downstream stats can look up\n# each final column's classification (date/currency/number/etc.) without\n# re-guessing it. Columns produced purely by a join/append operation that\n# don't trace back to an original file simply won't have an entry, and are\n# treated as 'text' downstream.\nrole_map = {}\nfor d in cleaned_datasets:\n    role_map.update(d['role_map'])\n\nif decision == 'standalone':\n    source = cleaned_datasets[0]\n    final_df = working[source['file_name']]\n    build_notes.append(f\"Standalone dataset '{source['file_name']}'.\")\n\nelif decision in ('append', 'join'):\n    operations = plan.get('operations') or []\n    if not operations:\n        raise ValueError(f\"Decision '{decision}' given but no operations were specified.\")\n\n    result_df = None\n    for idx, op in enumerate(operations):\n        op_type = op.get('type')\n        result_name = op.get('result_name') or f'__op{idx}__'\n\n        if op_type == 'append':\n            names = op.get('datasets') or []\n            frames = [working[n] for n in names if n in working]\n            if len(frames) < 2:\n                raise ValueError(\n                    f\"Operation {idx}: append needs at least two known datasets, found {len(frames)}.\"\n                )\n            result_df = pd.concat(frames, ignore_index=True, sort=False)\n            build_notes.append(f\"Appended {len(frames)} dataset(s): {', '.join(names)} -> '{result_name}'.\")\n\n        elif op_type == 'join':\n            left_name = op.get('left')\n            right_name = op.get('right')\n            keys = op.get('keys') or []\n            join_type = op.get('join_type', 'left')\n\n            if left_name not in working or right_name not in working:\n                raise ValueError(\n                    f\"Operation {idx}: join references a dataset that isn't available yet: \"\n                    f\"'{left_name}' or '{right_name}'.\"\n                )\n\n            left_df = working[left_name]\n            right_df = working[right_name]\n            result_df = left_df.merge(right_df, on=keys, how=join_type, suffixes=('', '_right'))\n            build_notes.append(f\"Joined '{left_name}' with '{right_name}' on {keys} ({join_type}) -> '{result_name}'.\")\n\n        else:\n            raise ValueError(f\"Operation {idx}: unknown operation type '{op_type}'.\")\n\n        working[result_name] = result_df\n\n    final_df = result_df\n\nelse:\n    raise ValueError(f\"Unknown planner decision: {decision}\")\n\nrecords = final_df.to_dict(orient='records')\nfor row in records:\n    for key, value in list(row.items()):\n        if pd.isna(value):\n            row[key] = None\n        else:\n            try:\n                row[key] = value.isoformat()\n            except AttributeError:\n                row[key] = str(value) if not isinstance(value, (int, float, bool)) else value\n\nreturn [{\n    'json': {\n        'dataset_session_id': payload['dataset_session_id'],\n        'app_session_id': payload.get('app_session_id'),\n        'plan': plan,\n        'build_note': ' | '.join(build_notes),\n        'final_rows': int(len(final_df)),\n        'final_columns': list(final_df.columns),\n        'role_map': role_map,\n        'final_records': records,\n        'quality_stats': payload['quality_stats'],\n        'quality_warnings': payload['quality_warnings']\n    }\n}]"
+      },
+      "id": "241c5e85-3faf-4e01-a601-d4f5ad38179d",
+      "name": "Python — Build Analytical Dataset",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23104,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "item = _items[0]\npayload = item['json']\nstats = dict(payload['quality_stats'])\nwarnings = list(payload['quality_warnings'])\n\nstats['rows_final'] = payload['final_rows']\nstats['columns_final'] = len(payload['final_columns'])\nstats['warnings'] = warnings\n\nreturn [{\n    'json': {\n        'dataset_session_id': payload['dataset_session_id'],\n        'app_session_id': payload.get('app_session_id'),\n        'plan': payload['plan'],\n        'build_note': payload['build_note'],\n        'final_columns': payload['final_columns'],\n        'role_map': payload['role_map'],\n        'final_records': payload['final_records'],\n        'quality_report': stats\n    }\n}]"
+      },
+      "id": "a27c7d01-f4ba-46ea-b8e2-d1920d89ea0e",
+      "name": "Python — Data Quality Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23360,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $input.item.json;\n\n// TODO: business_id must come from real tenant resolution (Supabase Auth\n// bearer token verification), not a hardcoded placeholder. Wire this up\n// once the trusted-tenant-resolution pattern is ported into this workflow.\nreturn [{\n  json: {\n    dataset_session_id: report.dataset_session_id,\n    app_session_id: report.app_session_id,\n    business_id: 'BUSINESS_ID_PLACEHOLDER',\n    final_columns: report.final_columns,\n    role_map: report.role_map,\n    final_records: report.final_records,\n    quality_report: report.quality_report,\n    build_note: report.build_note\n  }\n}];"
+      },
+      "id": "1ed817b0-942e-4fa1-a62e-d7036d688c70",
+      "name": "JS — Prepare Handoff Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        23744,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import json\n\nimport pandas as pd\n\nitem = _items[0]\npayload = item['json']\n\nbusiness_id_raw = str(payload['business_id'])\ndataset_session_id = payload['dataset_session_id']\napp_session_id = payload.get('app_session_id')\nfinal_records = payload['final_records']\nfinal_columns = payload['final_columns']\nrole_map = payload.get('role_map', {})\nquality_report = payload['quality_report']\n\n# Path-safe id -- defensive even though business_id is currently a fixed\n# placeholder; keeps a bad value from ever reaching a filesystem path\n# once real tenant IDs flow in here.\nbusiness_id = ''.join(c if (c.isalnum() or c in ('-', '_')) else '_' for c in business_id_raw)\n\nfinal_df = pd.DataFrame(final_records)\n\n# Serialize entirely in memory -- to_csv() with no path argument returns a\n# string rather than writing anywhere, so this never touches the\n# filesystem (and never touches the builtin `open`, which the Native\n# Python sandbox removes). The actual disk write happens downstream via\n# n8n's own Read/Write Files from Disk node, not from Python.\ncsv_text = final_df.to_csv(index=False)\ndtypes = {col: str(final_df[col].dtype) for col in final_df.columns}\n\n# This node's job ends at \"cleaned dataset + its metadata\" -- no summary,\n# stats, or interpretation. Exploratory analysis and question-answering\n# happen entirely in Workflow 2, which reads this metadata back.\nmeta = {\n    'business_id': business_id,\n    'dataset_session_id': dataset_session_id,\n    'app_session_id': app_session_id,\n    'status': 'active',\n    'row_count': int(len(final_df)),\n    'column_count': len(final_columns),\n    'columns': final_columns,\n    'dtypes': dtypes,\n    'role_map': role_map,\n    'quality_report': quality_report\n}\n\nreturn [{\n    'json': {\n        'business_id': business_id,\n        'dataset_session_id': dataset_session_id,\n        'row_count': meta['row_count'],\n        'csv_text': csv_text,\n        'meta': meta\n    }\n}]"
+      },
+      "id": "2a6a57a7-603a-482b-bcc0-150e89bec04b",
+      "name": "Python — Save Session Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        24032,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import json\nimport os\nimport shutil\n\nitem = _items[0]\npayload = item['json']\n\nbusiness_id = payload['business_id']\n\n# /tmp is writable by any user in virtually every container setup, so\n# this skips path-probing entirely. Set SABIMAN_DATA_DIR if you want\n# session data on a persistent volume instead -- just make sure that\n# path is actually writable by whatever user runs the Python task\n# runner (chown it once rather than working around it here). Note:\n# /tmp is typically cleared when the n8n container restarts, so\n# sessions won't survive a restart with the default path.\nsessions_root = os.environ.get('SABIMAN_DATA_DIR', '/tmp/sabiman')\n\nbase_dir = f'{sessions_root}/{business_id}'\nactive_dir = f'{base_dir}/active'\narchive_dir = f'{base_dir}/archive'\nactive_meta_path = f'{active_dir}/meta.json'\n\nos.makedirs(archive_dir, exist_ok=True)\n\nprevious_session_id = ''\nif os.path.isfile(active_meta_path):\n    fd = os.open(active_meta_path, os.O_RDONLY)\n    try:\n        chunks = []\n        while True:\n            chunk = os.read(fd, 65536)\n            if not chunk:\n                break\n            chunks.append(chunk)\n    finally:\n        os.close(fd)\n\n    try:\n        old_meta = json.loads(b''.join(chunks).decode('utf-8'))\n        previous_session_id = old_meta.get('dataset_session_id') or 'unknown'\n    except (ValueError, UnicodeDecodeError):\n        previous_session_id = 'unknown'\n\n    dest = f'{archive_dir}/{previous_session_id}'\n    if os.path.exists(dest):\n        shutil.rmtree(dest)\n    shutil.move(active_dir, dest)\n\nos.makedirs(active_dir, exist_ok=True)\n\npayload['previous_session_id'] = previous_session_id or None\npayload['sessions_root'] = sessions_root\npayload['active_dir'] = active_dir\npayload['archive_dir'] = archive_dir\nreturn [{'json': payload}]"
+      },
+      "id": "b9f849f2-0093-4337-a1b7-00c5be1b8927",
+      "name": "Archive Previous Session",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        24352,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const saved = $input.item.json;\nconst previousSessionId = saved.previous_session_id || null;\n\nconst meta = { ...saved.meta, previous_session_id: previousSessionId };\nconst activeDir = saved.active_dir;\n\nreturn [{\n  json: {\n    business_id: saved.business_id,\n    dataset_session_id: saved.dataset_session_id,\n    app_session_id: meta.app_session_id,\n    previous_session_id: previousSessionId,\n    row_count: saved.row_count,\n    csv_text: saved.csv_text,\n    meta: meta,\n    active_dir: activeDir,\n    dataset_path: `${activeDir}/dataset.csv`,\n    meta_path: `${activeDir}/meta.json`\n  }\n}];"
+      },
+      "id": "456b76b0-e686-4c9a-b185-5f9cb0e956c7",
+      "name": "JS — Merge Session File Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        24624,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import json\nimport os\n\nitem = _items[0]\npayload = item['json']\n\ndataset_path = payload['dataset_path']\nmeta_path = payload['meta_path']\n\ncsv_bytes = payload['csv_text'].encode('utf-8')\nmeta_bytes = json.dumps(payload['meta'], indent=2).encode('utf-8')\n\n# open() is removed from the Native Python sandbox, so files are written\n# with the low-level os module -- same os.open/os.write/os.close pattern\n# used to work around that elsewhere in this workflow. Each file is\n# written to a .tmp path first, fsync'd, then moved into place with\n# os.replace(), which is atomic on the same filesystem. That means a\n# reader (including a standalone Workflow 2 question-mode call hitting\n# disk mid-write) only ever sees the previous complete file or the new\n# complete file -- never a truncated/partial one.\nfor final_path, data_bytes in ((dataset_path, csv_bytes), (meta_path, meta_bytes)):\n    tmp_path = f'{final_path}.tmp'\n    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)\n    try:\n        os.write(fd, data_bytes)\n        os.fsync(fd)\n    finally:\n        os.close(fd)\n    os.replace(tmp_path, final_path)\n\nreturn [{'json': payload}]"
+      },
+      "id": "41efc7dd-8910-477a-b78e-114b51c4a2db",
+      "name": "Python — Write Session Files to Disk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        24896,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.item.json;\n\n// Push the cleaned dataset + its structure straight through -- Workflow 2\n// no longer needs to read dataset.csv / meta.json back off disk on a\n// live handoff from Workflow 1. dataset_path/meta_path are still passed\n// along too, since the files genuinely exist on disk now (written\n// directly by Python — Write Session Files to Disk) and Workflow 2's\n// standalone question-mode calls, which aren't chained off a Workflow 1\n// run, still need a path to read from.\nreturn [{\n  json: {\n    mode: 'initial_eda',\n    dataset_session_id: payload.dataset_session_id,\n    business_id: payload.business_id,\n    app_session_id: payload.app_session_id,\n    dataset_path: payload.dataset_path,\n    meta_path: payload.meta_path,\n    csv_text: payload.csv_text,\n    meta: payload.meta,\n    question: null\n  }\n}];"
+      },
+      "id": "d56403a0-fdb9-4aa4-a524-9f1f7646c444",
+      "name": "JS — Build Workflow 2 Trigger Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        25408,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "htmQvLN6g1Ooiiui",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/htmQvLN6g1Ooiiui",
+          "cachedResultName": "SABIMAN Workflow 2 — Unified AI Analyst"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "mode": "initial_eda",
+            "dataset_session_id": "={{ $json.dataset_session_id }}",
+            "dataset_path": "={{ $json.dataset_path }}",
+            "meta_path": "={{ $json.meta_path }}",
+            "meta": "={{ $json.meta }}",
+            "business_id": "={{ $json.business_id }}",
+            "app_session_id": "={{ $json.app_session_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "mode",
+              "displayName": "mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "dataset_session_id",
+              "displayName": "dataset_session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "dataset_path",
+              "displayName": "dataset_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "meta_path",
+              "displayName": "meta_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "csv_text",
+              "displayName": "csv_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "meta",
+              "displayName": "meta",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object"
+            },
+            {
+              "id": "columns",
+              "displayName": "columns",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "dtypes",
+              "displayName": "dtypes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object",
+              "removed": false
+            },
+            {
+              "id": "role_map",
+              "displayName": "role_map",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object",
+              "removed": false
+            },
+            {
+              "id": "quality_report",
+              "displayName": "quality_report",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "object",
+              "removed": false
+            },
+            {
+              "id": "warnings",
+              "displayName": "warnings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "question",
+              "displayName": "question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "business_id",
+              "displayName": "business_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "app_session_id",
+              "displayName": "app_session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "6be10ffb-33df-4d98-94ae-fcdc471dd32a",
+      "name": "Execute Workflow — Dataset Analysis (Initial EDA)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        25664,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const handoffPayload = $('JS — Prepare Handoff Payload').item.json;\nconst fileResult = $('Python — Write Session Files to Disk').item.json;\n\nconst analysis = $input.item.json || {};\n\n// Workflow 2 response is passed through so the frontend receives\n// the complete initial EDA result.\n\nreturn [{\n  json: {\n    success: analysis.success !== false,\n\n    // Dataset/session information from Workflow 1\n    dataset_session_id: handoffPayload.dataset_session_id,\n    previous_session_id: fileResult.previous_session_id || null,\n\n    status: 'active',\n    dataset_ready: true,\n\n    rows: handoffPayload.final_records.length,\n    columns: handoffPayload.final_columns,\n    role_map: handoffPayload.role_map,\n    quality_report: handoffPayload.quality_report,\n\n    dataset_path: fileResult.dataset_path,\n    meta_path: fileResult.meta_path,\n\n    // ===== WORKFLOW 2 ANALYSIS =====\n\n    mode: analysis.mode || 'initial_eda',\n\n    answer: analysis.answer || '',\n    summary: analysis.summary || '',\n\n    voice_output:\n      analysis.voice_output ||\n      analysis.answer ||\n      analysis.summary ||\n      '',\n\n    findings: Array.isArray(analysis.findings)\n      ? analysis.findings\n      : [],\n\n    recommendations: Array.isArray(analysis.recommendations)\n      ? analysis.recommendations\n      : [],\n\n    kpis: Array.isArray(analysis.kpis)\n      ? analysis.kpis\n      : [],\n\n    visualizations: Array.isArray(analysis.visualizations)\n      ? analysis.visualizations\n      : [],\n\n    quick_questions: Array.isArray(analysis.quick_questions)\n      ? analysis.quick_questions\n      : [],\n\n    eda_highlights: Array.isArray(analysis.eda_highlights)\n      ? analysis.eda_highlights\n      : [],\n\n    // Optional compatibility fields for older frontend code\n    dashboard: analysis.dashboard || null,\n    visualization: analysis.visualization || null,\n    finding: analysis.finding || '',\n    recommendation: analysis.recommendation || '',\n\n    // Keep the complete Workflow 2 response available\n    analysis_result: analysis,\n\n    created_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "ff04f519-dc29-4bc9-bd44-3ed66986f59d",
+      "name": "JS — Finalize Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        25920,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "34cd683f-9edd-4937-8ebb-7f0c754aa1b5",
+      "name": "Respond — Dataset Ready",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        26176,
+        224
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Dataset Upload Webhook": {
+      "main": [
+        [
+          {
+            "node": "File Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Validation": {
+      "main": [
+        [
+          {
+            "node": "Bridge Binary Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bridge Binary Files": {
+      "main": [
+        [
+          {
+            "node": "Python — Profile Raw Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Profile Raw Dataset": {
+      "main": [
+        [
+          {
+            "node": "AI — Dataset Structure Planner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI — Dataset Structure Planner": {
+      "main": [
+        [
+          {
+            "node": "JS — Prepare Cleaning Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS — Prepare Cleaning Input": {
+      "main": [
+        [
+          {
+            "node": "Python — CLEAN + NORMALIZE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — CLEAN + NORMALIZE": {
+      "main": [
+        [
+          {
+            "node": "Python — Validate Join / Append",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Validate Join / Append": {
+      "main": [
+        [
+          {
+            "node": "Python — Build Analytical Dataset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Build Analytical Dataset": {
+      "main": [
+        [
+          {
+            "node": "Python — Data Quality Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Data Quality Report": {
+      "main": [
+        [
+          {
+            "node": "JS — Prepare Handoff Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS — Finalize Response": {
+      "main": [
+        [
+          {
+            "node": "Respond — Dataset Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Model — Dataset Structure Planner": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI — Dataset Structure Planner",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Save Session Files": {
+      "main": [
+        [
+          {
+            "node": "Archive Previous Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Previous Session": {
+      "main": [
+        [
+          {
+            "node": "JS — Merge Session File Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS — Prepare Handoff Payload": {
+      "main": [
+        [
+          {
+            "node": "Python — Save Session Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS — Build Workflow 2 Trigger Payload": {
+      "main": [
+        [
+          {
+            "node": "Execute Workflow — Dataset Analysis (Initial EDA)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow — Dataset Analysis (Initial EDA)": {
+      "main": [
+        [
+          {
+            "node": "JS — Finalize Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS — Merge Session File Data": {
+      "main": [
+        [
+          {
+            "node": "Python — Write Session Files to Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python — Write Session Files to Disk": {
+      "main": [
+        [
+          {
+            "node": "JS — Build Workflow 2 Trigger Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
