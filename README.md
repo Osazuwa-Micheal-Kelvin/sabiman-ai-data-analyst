@@ -193,7 +193,7 @@ Being upfront about where the project is today:
 
 ## License and security
 
-- **License:** © 2026 Osazuwa Micheal Kelvin. All rights reserved. You may view the project and import the workflows for personal evaluation and testing. Commercial use or redistribution requires written permission. See [LICENSE](./LICENSE).
+- **License:** © 2026 Osazuwa Micheal Kelvin. All rights reserved. You may view the project and import the workflows for personal evaluation and testing. Commercial use or redistribution requires written permission. See [LICENSE](./LICENSE.md).
 - **Security:** credentials and sample data have been removed from the exports. Always use your own API keys. See [SECURITY.md](./SECURITY.md) to report an issue.
 
 ---
