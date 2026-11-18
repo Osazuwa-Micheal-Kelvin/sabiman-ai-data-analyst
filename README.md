@@ -193,9 +193,9 @@ Being upfront about where the project is today:
 
 ## License and security
 
-- **License:** © 2026 [Your Full Name]. All rights reserved. You may view the project and import the workflows for personal evaluation and testing. Commercial use or redistribution requires written permission. See [LICENSE](./LICENSE).
+- **License:** © 2026 Osazuwa Micheal Kelvin. All rights reserved. You may view the project and import the workflows for personal evaluation and testing. Commercial use or redistribution requires written permission. See [LICENSE](./LICENSE).
 - **Security:** credentials and sample data have been removed from the exports. Always use your own API keys. See [SECURITY.md](./SECURITY.md) to report an issue.
 
 ---
 
-*Built by [Your Full Name]. Want something like this for your business? Message me on [LinkedIn / Upwork / email].*
+*Built by Osazuwa Micheal Kelvin. Want something like this for your business? Message me on [LinkedIn / Upwork / email].*
