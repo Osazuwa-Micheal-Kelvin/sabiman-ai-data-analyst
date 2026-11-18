@@ -198,4 +198,4 @@ Being upfront about where the project is today:
 
 ---
 
-*Built by Osazuwa Micheal Kelvin. Want something like this for your business? Message me on [LinkedIn / Upwork / email].*
+*Built by Osazuwa Micheal Kelvin. Want something like this for your business? Message me on osazuwamichealkelvin@gmail.com.*
